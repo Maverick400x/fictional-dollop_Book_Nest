@@ -29,6 +29,10 @@ import { Order } from "./models/order.model.js";
 
 const app = express();
 
+// Render (and Vercel) terminate HTTPS at a proxy. Without this, Express
+// thinks the request is plain HTTP and never sends the secure session cookie.
+app.set("trust proxy", 1);
+
 // Middleware setup
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
@@ -39,7 +43,11 @@ app.use(
     secret: process.env.SESSION_SECRET || "secret-key",
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: process.env.NODE_ENV === "production" }, // secure in prod
+    cookie: {
+      secure: process.env.NODE_ENV === "production", // HTTPS only in prod
+      httpOnly: true,
+      sameSite: "lax", // lets the cookie survive the redirect back from Google
+    },
   })
 );
 
@@ -78,11 +86,13 @@ passport.use(
           // Send Welcome Email asynchronously
           setImmediate(async () => {
             try {
+              const baseUrl =
+                process.env.BASE_URL || "https://dollop-book-nest.onrender.com";
               const text = `Hello ${user.fullName}, welcome to BookNest! You logged in using Google.`;
               const html = `
                 <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; line-height: 1.6;">
                   <div style="text-align: center; margin-bottom: 20px;">
-                    <img src="https://book-nest-wgrp.onrender.com/logo.png" alt="BookNest Logo" style="height: 60px;">
+                    <img src="${baseUrl}/logo.png" alt="BookNest Logo" style="height: 60px;">
                     <h2 style="color: #333;">🎉 Welcome to <strong>BookNest</strong>, ${user.fullName}!</h2>
                   </div>
                   <p>Welcome back! You logged in using your Google account.</p>
@@ -149,7 +159,8 @@ app.get(
       username: req.user.username,
     };
 
-    res.redirect("/"); // Redirect home after login
+    // Make sure the session is stored before redirecting
+    req.session.save(() => res.redirect("/"));
   }
 );
 
